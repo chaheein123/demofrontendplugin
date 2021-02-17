@@ -52,27 +52,37 @@
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
-			</plugin>
+				<executions>
+					<execution>
+						<id>Generate Build information</id>
+						<goals>
+						<goal>build-info</goal>
+						</goals>
+					</execution>
 
+				</executions>
+			</plugin>
 			<plugin>
 				<groupId>com.github.eirslett</groupId>
 				<artifactId>frontend-maven-plugin</artifactId>
 				<version>1.7.6</version>
 				<executions>
 					<execution>
-						<id>Install Node and npm...</id>
+						<id>install node and npm</id>
 						<goals>
 							<goal>install-node-and-npm</goal>
 						</goals>
 						<phase>generate-resources</phase>
 						<configuration>
-							<nodeVersion>v10.16.1</nodeVersion>
-							<npmVersion>6.9.0</npmVersion>
+							<nodeVersion>v10.14.1</nodeVersion>
+							<nodeDownloadRoot>https://nexus.prod.cloud.fedex.com:8443/nexus/repository/node-dist/</nodeDownloadRoot>
+							<npmVersion>6.11.3</npmVersion>
+							<npmDownloadRoot>https://nexus.prod.cloud.fedex.com:8443/nexus/repository/npm-dist/</npmDownloadRoot>
 						</configuration>
 					</execution>
 
 					<execution>
-						<id>npm install all of our dependencies</id>
+						<id>npm install all of the dependencies</id>
 						<goals>
 							<goal>npm</goal>
 						</goals>
@@ -84,7 +94,7 @@
 					</execution>
 
 					<execution>
-						<id>npm build our angular application</id>
+						<id>npm run build the Angular application</id>
 						<goals>
 							<goal>npm</goal>
 						</goals>
@@ -94,6 +104,7 @@
 							<arguments>run build</arguments>
 						</configuration>
 					</execution>
+
 				</executions>
 				<configuration>
 					<workingDirectory>src/main/webapp</workingDirectory>
@@ -103,26 +114,30 @@
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-resources-plugin</artifactId>
+				<version>3.1.0</version>
 				<executions>
 					<execution>
-						<id>Copy my angular frontend to the static folder</id>
+						<id>Copy the angular project to the static folder</id>
 						<phase>process-resources</phase>
 						<goals>
 							<goal>copy-resources</goal>
 						</goals>
+
 						<configuration>
 							<outputDirectory>target/classes/static</outputDirectory>
 							<resources>
 								<resource>
 									<directory>src/main/webapp/dist/webapp</directory>
 									<filtering>true</filtering>
+
 								</resource>
+
 							</resources>
 						</configuration>
 					</execution>
+
 				</executions>
 			</plugin>
-
 		</plugins>
 	</build>
 </project>
