@@ -1,0 +1,658 @@
+library 'reference-pipeline'
+library 'AppServiceAccount'
+library 'fxl-ref-pipeline'
+//library 'fedex-ci-pipeline'
+
+pipeline {
+  // agent any
+  
+  agent {
+    node {
+      label '10294'
+    }
+  }
+
+  options {
+buildDiscarder(logRotator(numToKeepStr: '05'))
+  }
+
+  tools {
+    jdk 'JAVA_8'
+    maven 'Maven 3.3.3'
+  }
+
+  parameters {
+        // the default is always the first item in the list
+        choice(name: 'CF_ENV', choices: ['development', 'test', 'production', ], description: 'Select the Target Environment')
+        booleanParam(name: 'Deployment', defaultValue: true, description: '')
+        booleanParam(name: 'QualityGateByPass', defaultValue: false, description: '')
+      }
+
+      environment {
+        GIT_PROJECT_ID = '27456'
+        // change
+        // CF_APP_NAME = 'ngx-swi-dif'
+        CF_APP_NAME = 'ngx-swi-dif'
+        EAI_NUMBER = '3534999'
+        EAI_NAME = 'FTNTB-LICENSEPERMITCERTOTHER'
+
+        /* EAI Folder is needed for Nexus IQ. You can go to keyword 'cicd', login and enter your EAI and then select nexusIQ to onboard. You will get an email with EAI Folder name. */
+
+        EAI_FOLDER_NAME = '27456_FTNTB-LICENSEPERMITCERTOTHER'
+
+        /* Employee numbers who can approve the deployment into production */
+
+       // APP_CM_EMP_IDS="399605,913082,5223936,3845794"
+
+        NEXUS_CREDS_ID = '3534999-NEXUS-CREDS-ID'
+
+        /* credentials is a method that will take credentials id as the argument which will return user id and password in JSON format. You will need to add the credentials in the Jenkins credentials. */
+
+        /* We will use the database credentials while deploying to PCF (in deploy method). We will use the credentials as _USR and _PSW for user id and password respectively*/
+
+        /* TODO: Add database credentials
+
+        DEV_DB_CREDS=credentials('3535594-DEV-DB-CREDS')
+
+        REL_DB_CREDS=credentials('')
+
+        STAGE_DB_CREDS=credentials('')
+
+        */
+
+        // GITLAB_API_TOKEN = credentials('GIT_API_TOKEN_ID')
+        DEPLOY_HOSTS = ''
+        DEPLOY_USER = '3967369'
+        JAR_PATH = '/home/3967369/testngx'
+        DEV_HOSTS = '10.60.24.3,'
+        TEST_HOSTS = ','
+        PROD_HOSTS = ''
+
+        /* Employee numbers who can approve the deployment */
+        EMAIL_APPROVER = '' //'2963768@fedex.com, 3646150@fedex.com, 3742021@fedex.com, 3888424@fedex.com'
+        APP_CM_EMP_IDS = '' //'2963768,3646150,3742021,3888424'
+        /* Get the channel URL from Microsoft Teams that you have created for your team*/
+
+        TEAMS_WEBHOOK = ''
+
+        /* Leave the following default values */
+        APP_VERSION = ''
+        GIT_BRANCH = "${env.BRANCH_NAME}"
+        APP_TYPE = ''
+        APP_GROUP = ''
+        CUPS_PROPERTIES = ''
+        NEXUS_REPO = ''
+        NEXUS_VERSION = ''
+        RELEASE_FLAG = false
+
+        JK_TIMESTAMP = new Date().format('yyyy-MM-dd HH:mm:ss', TimeZone.getTimeZone('CST'))
+
+        QUALITYGATES_STATUS = 'EXCEPTION'
+        SONARSCAN_STATUS = 'EXCEPTION'
+        SONAR_PROJECT_KEY = ''
+        SONAR_PROJECT_BRANCH = ''
+      }
+
+  stages {
+    stage('Initialize') {
+      steps {
+        script {
+          startTime = System.currentTimeMillis()
+
+          // change later
+          APP_GROUP = readMavenPom().getGroupId()
+          APP_VERSION = readMavenPom().getVersion()
+          //APP_GROUP = 'com.fedex'
+          //APP_VERSION = '0.0.1-SNAPSHOT'
+
+          APP_TYPE = 'jar'
+          //TARGET_ARTIFACT_PATH = "target/${CF_APP_NAME}.${APP_TYPE}"
+          TARGET_ARTIFACT_PATH = "target/${CF_APP_NAME}-${APP_VERSION}.${APP_TYPE}"
+
+
+          BUILDNUMBER = "${env.BUILD_NUMBER}"
+          println "App version is ${APP_VERSION}"
+          println "Group is ${APP_GROUP}"
+          println "App Name is ${CF_APP_NAME}"
+
+          if (env.CF_ENV == 'Select' || env.CF_ENV == 'null') {
+            currentBuild.result = 'ABORTED'
+            error('Aborting the build to prevent a automated start.')
+          }
+          else if (env.CF_ENV == 'production') {
+            APP_CM_EMP_IDS = ''
+            NEXUS_REPO = 'release'
+            NEXUS_VERSION = "${TAG}"
+            RELEASE_FLAG = true
+            DEPLOY_HOSTS = "${PROD_HOSTS}"
+          }
+          else if (GIT_BRANCH.contains('master')) {
+            NEXUS_REPO = 'release'
+            NEXUS_VERSION = "${APP_VERSION}-${BUILDNUMBER}"
+            RELEASE_FLAG = true
+            DEPLOY_HOSTS = "${TEST_HOSTS}"
+            APP_CM_EMP_IDS = '3833172,3860190'
+          }
+          else {
+            NEXUS_REPO = 'snapshot'
+
+            // change
+            // NEXUS_VERSION = "${APP_VERSION}-SNAPSHOT"
+            NEXUS_VERSION = "${APP_VERSION}"
+            DEPLOY_HOSTS = "${DEV_HOSTS}"
+          }
+
+          println "Nexus Repo is ${NEXUS_REPO}"
+          println "Nexus version is ${NEXUS_VERSION}"
+          println "Hosts are ${DEPLOY_HOSTS}"
+
+          Construct_Pipeline_StageView = ''
+          SONAR_PROJECT_KEY = ''
+          SONAR_PROJECT_BRANCH = ''
+          DEPLOYED_CHECKSUM  = ''
+          Test_Result = ''
+        }
+      }
+            post {
+                always    {    script    {    Construct_Pipeline_StageView =  pipelineStageView  stageName : "${env.STAGE_NAME}", buildStatus : currentBuild.currentResult, startTime : startTime, constructPipelineStageView : Construct_Pipeline_StageView    }    }
+            }
+
+    }
+
+     
+     stage('Build') {
+      when {
+        anyOf {
+          environment name: 'CF_ENV', value: 'development'
+          environment name: 'CF_ENV', value: 'test'
+          branch 'develop'
+          branch 'master'
+          branch 'new-devlop-search-3955712'
+        }
+
+        not {
+          anyOf {
+            environment name: 'CF_ENV', value: 'staging'
+            environment name: 'CF_ENV', value: 'production'
+          }
+        }
+      }
+
+      steps {
+        script {
+          echo 'Stage Name -- ' + env.STAGE_NAME
+          startTime = System.currentTimeMillis()
+          println "Building source from branch ${GIT_BRANCH}"
+
+          println "devops time"
+
+          // sh 'cd src/main/webapp && npm install && npm run build'
+          // sh 'cd src/main/webapp && npm install && npm run build'
+          // sh 'chmod +x mvnw'
+          println "mvn version!"
+          //sh 'cd src/main/webapp && npm install && npm run build && echo "success?" && ls -a'
+          // sh ''
+          sh 'mvn clean package -Dmaven.test.failure.ignore=true -e'
+          //sh 'cd src/main/webapp && npm install && npm run build && echo "success?" && ls -a'
+          //sh 'cd src/main/webapp && npm install && npm run build'
+          
+          // sh 'mvn -s settings.xml clean package'
+          // sh 'ls -a'
+          // sh 'pwd'
+          //sh 'npm install'
+        }
+      }
+
+      
+
+            post {
+                always    {    script    {    Construct_Pipeline_StageView =  pipelineStageView  stageName : "${env.STAGE_NAME}", buildStatus : currentBuild.currentResult, startTime : startTime, constructPipelineStageView : Construct_Pipeline_StageView    }    }
+            }
+
+    }
+    
+
+    /* stage('SonarQube & NexusIQ') {
+      parallel {
+        stage('SonarQube - Static Code Analysis') {
+          when {
+            anyOf {
+              environment name: 'CF_ENV', value: 'development'
+              environment name: 'CF_ENV', value: 'test'
+              branch 'development'
+              branch 'master'
+            }
+
+            not {
+              anyOf {
+                environment name: 'CF_ENV', value: 'staging'
+
+                environment name: 'CF_ENV', value: 'production'
+              }
+            }
+          }
+
+          steps {
+            println 'Running SonarQube'
+
+            echo 'Stage Name -- ' + env.STAGE_NAME
+
+            script {
+              startTime = System.currentTimeMillis()
+              def projectName = "${EAI_FOLDER_NAME}:${CF_APP_NAME}"
+              def projectKey = "${CF_APP_NAME}"
+              def branchName = 'master'
+
+              if (env.BRANCH_NAME != 'master') {
+                branchName = 'branch-' + env.BRANCH_NAME
+              }
+              // Statistics input parameters for the email Notify
+              SONAR_PROJECT_KEY = projectKey
+              SONAR_PROJECT_BRANCH = branchName
+
+             // customized fxl pipeline
+
+              fxlSonarqube projectName : "${projectName}", projectKey : "${projectKey}",
+                                          projectVersion : "${APP_VERSION}",
+                                          src : 'src/main',
+                                          test : 'src/test',
+                                          binaries : 'target',
+                                          repo : 'git',
+                                          scmDisabled : 'false',
+                                          junitPath : 'target/surefire-reports',
+                                          jacocoPath : 'target/jacoco.exec',
+                                          profile : 'FXL_FTN_JAVA',
+                                          javaVersion : '1.8',
+                                          buildNumber : "${env.BUILD_NUMBER}",
+                                          branchName : "${branchName}",
+                                          sourceEncoding : 'UTF-8'
+            }
+          }
+
+              post {
+                always {   
+                    script{  
+                        Construct_Pipeline_StageView =   pipelineStageView  stageName : "${env.STAGE_NAME}", buildStatus : currentBuild.currentResult, startTime : startTime, constructPipelineStageView : Construct_Pipeline_StageView    
+                        if(currentBuild.currentResult == 'SUCCESS')    {
+                            SONARSCAN_STATUS = "SUCCESS"
+                        }
+                    }
+                }
+            }
+
+        } */
+
+            /*  NexusIQ Scan */
+
+            /* stage('NexusIQ - libraries Scan') {
+              when {
+                anyOf {
+                  environment name: 'CF_ENV', value: 'development'
+                  environment name: 'CF_ENV', value: 'test'
+                  branch 'development'
+                  branch 'master'
+                }
+                not {
+                  anyOf {
+                    environment name: 'CF_ENV', value: 'staging'
+                    environment name: 'CF_ENV', value: 'production'
+                  }
+                }
+              }
+
+              steps {
+                script {
+                  startTime = System.currentTimeMillis()
+                  def policyEvaluationStatus = nexusPolicyEvaluation iqApplication: "${EAI_FOLDER_NAME}", iqStage: 'build'
+                  echo '-- NexusIQ policyEvaluation Status ' + policyEvaluationStatus
+                }
+              }
+
+          post {
+                always {   script{  Construct_Pipeline_StageView =   pipelineStageView  stageName : "${env.STAGE_NAME}", buildStatus : currentBuild.currentResult, startTime : startTime, constructPipelineStageView : Construct_Pipeline_StageView    }    }
+            }
+
+            }
+      }
+    } */
+
+          /*  Sonar Quality Gate Check         */
+
+    /* stage('Sonar Quality Gate Check') {
+		  when {
+			anyOf {
+			  environment name: 'CF_ENV', value: 'development'
+			  environment name: 'CF_ENV', value: 'test'
+			  branch 'development'
+			  branch 'master'
+			}
+			not {
+			  anyOf {
+				environment name: 'CF_ENV', value: 'production'
+				buildingTag()
+			  }
+			}
+		  }
+
+		  steps {
+			println 'Sonar Quality Gate Check is triggered'
+
+			script {
+			  startTime = System.currentTimeMillis()
+			  if (SONARSCAN_STATUS == 'SUCCESS') {
+				QUALITYGATES_STATUS =  fxlSonarQualityGate.qualityGateAnalysis  timeoutMinutes:'10', waitSecs:'360'
+
+            echo "--- QUALITYGATES STATUS = ${QUALITYGATES_STATUS}"
+            
+            if (QUALITYGATES_STATUS != 'OK' && env.BRANCH_NAME == "master") {
+            
+                if(env.QualityGateByPass == 'true'){
+                    qualityGateByPassApproval recipients : "3646150@fedex.com",
+                    deployEnv : "${env.CF_ENV}",
+                    applicationParam : "${CF_APP_NAME}",
+                    eaiParam : "${EAI_FOLDER_NAME}",
+                    hostSevers : "${DEPLOY_HOSTS}",
+                    approvalEmpIds : "3646150"
+
+            }
+            else
+            
+              error "Pipeline aborted due to quality gate failure: ${QUALITYGATES_STATUS}"
+            }
+          }
+        }
+      }
+
+       post {
+            always {   script{  Construct_Pipeline_StageView =   pipelineStageView  stageName : "${env.STAGE_NAME}", buildStatus : currentBuild.currentResult, startTime : startTime, constructPipelineStageView : Construct_Pipeline_StageView    }    }
+        }
+    } */
+
+        /* TODO: Add Nexus Staging and Pull after Crednetials are added to Jenkins  */
+
+    stage('Nexus Staging - Upload Artifact') {
+      when {
+        anyOf {
+          environment name: 'CF_ENV', value: 'test'
+          branch 'master'
+          // change later
+          branch 'new-devlop-search-3955712'
+        }
+      }
+
+      steps {
+        script {
+          startTime = System.currentTimeMillis()
+          println "Uploading war/jar to Nexus ${CF_APP_NAME}"
+
+          nexusArtifactUploader artifacts: [[artifactId: "${CF_APP_NAME}", classifier: '', file: "${TARGET_ARTIFACT_PATH}", type: "${APP_TYPE}"]],
+                            credentialsId: "${NEXUS_CREDS_ID}",
+                            groupId: "eai${EAI_NUMBER}.${APP_GROUP}",
+                            nexusUrl: 'nexus.prod.cloud.fedex.com:8443/nexus',
+                            nexusVersion: 'nexus3',
+                            protocol: 'https',
+                            repository: "${NEXUS_REPO}",
+                            version: "${NEXUS_VERSION}"
+        }
+      }
+
+            post {
+                always {
+                    script{ 
+                        Construct_Pipeline_StageView =  pipelineStageView  stageName : "${env.STAGE_NAME}", buildStatus : currentBuild.currentResult, startTime : startTime, constructPipelineStageView : Construct_Pipeline_StageView    
+                        JK_TIMESTAMP = new Date().format("yyyy-MM-dd HH:mm:ss", TimeZone.getTimeZone("CST"))
+                    }
+                }
+            }
+    }
+
+        /* stage('Deployment approval') {
+        agent none
+        when {
+            environment name: 'Deployment', value: 'true'
+            anyOf {
+          environment name: 'CF_ENV', value: 'test'
+          environment name: 'CF_ENV', value: 'production'
+          branch 'master'
+          buildingTag()
+          //branch 'development'
+          
+            }
+        }
+        options {
+            timeout(time: 60, unit: 'MINUTES')
+        }
+        steps {
+            script {
+            approvalEmailNotify recipients : "${EMAIL_APPROVER}",
+                                deployEnv : "${env.CF_ENV}",
+                                applicationParam : "${CF_APP_NAME}",  eaiParam : "${EAI_FOLDER_NAME}",
+                                hostSevers : "${DEPLOY_HOSTS}",
+                                approvalEmpIds : "$APP_CM_EMP_IDS"
+            }
+        }
+        post {
+            always {   script {    Construct_Pipeline_StageView =  pipelineStageView  stageName : "${env.STAGE_NAME}", buildStatus : currentBuild.currentResult, startTime : startTime, constructPipelineStageView : Construct_Pipeline_StageView }   }
+        }
+        } */
+
+    stage('Nexus Pull') {
+        when {
+            anyOf {
+              environment name: 'CF_ENV', value: 'production'
+              branch 'new-devlop-search-3955712'
+              branch 'master'
+              buildingTag()
+          }
+        }
+        steps {
+          script {
+            startTime = System.currentTimeMillis()
+            println 'Downloading from nexus repo...'
+            downloadNexusArtifact groupId: "eai${EAI_NUMBER}.${APP_GROUP}",
+                      artifactId: "${CF_APP_NAME}",
+                      repo:"${NEXUS_REPO}",
+                      release: "${RELEASE_FLAG}".toBoolean(),
+                      extension: "${APP_TYPE}",
+                      version: "${NEXUS_VERSION}",
+                      downloadFileName: "${CF_APP_NAME}.${APP_TYPE}"
+
+            TARGET_ARTIFACT_PATH = "./${CF_APP_NAME}.${APP_TYPE}"
+          }
+        }
+        post {
+            always {   script {  Construct_Pipeline_StageView =   pipelineStageView  stageName : "${env.STAGE_NAME}", buildStatus : currentBuild.currentResult, startTime : startTime, constructPipelineStageView : Construct_Pipeline_StageView    }    }
+        }
+    }
+
+        /* 
+        stage('Development Env - Deployment') {
+        when {
+          allOf {
+            environment name: 'Deployment', value: 'true'
+            branch 'development'
+            }
+            not {
+          anyOf {
+            environment name: 'CF_ENV', value: 'production'
+            branch 'master'
+            buildingTag()
+          }
+            }
+        }
+
+        steps {
+            script {
+          startTime = System.currentTimeMillis()
+          def deployHosts =  DEPLOY_HOSTS.split(',')
+
+          for ( host in deployHosts ) {
+            println (host)
+            sshagent (['', '']) {
+              sh "ssh -o 'StrictHostKeyChecking=no'  ${DEPLOY_USER}@${host} 'sh ${JAR_PATH}/shutdown.sh'"
+              sh "scp -o StrictHostKeyChecking=no ${TARGET_ARTIFACT_PATH} ${DEPLOY_USER}@${host}:${JAR_PATH}/${CF_APP_NAME}.${APP_TYPE}"
+              sh "ssh -o 'StrictHostKeyChecking=no'  ${DEPLOY_USER}@${host} 'sh ${JAR_PATH}/startup.sh'"
+            }
+          }
+            }
+        }
+      post {
+        always {   script {  Construct_Pipeline_StageView =   pipelineStageView  stageName : "${env.STAGE_NAME}", buildStatus : currentBuild.currentResult, startTime : startTime, constructPipelineStageView : Construct_Pipeline_StageView    }    }
+      }
+    }
+    */
+
+    stage('Test Env - Deployment') {
+       /*
+        this is commented out for now for testing, but needs change later
+        when {
+            allOf {
+              branch 'master'
+              environment name: 'Deployment', value: 'true'
+            }
+            not {
+              anyOf {
+                environment name: 'CF_ENV', value: 'production'
+                buildingTag()
+              }
+            }
+        }
+        */
+        steps {
+          script {
+            startTime = System.currentTimeMillis()
+            echo 'Deploying'
+            def deployHosts = DEPLOY_HOSTS.split(',')
+
+            for ( host in deployHosts ) {
+              println (host);
+              println (deployHosts.size());
+              println ("Using the sshagent now!");
+              sshagent (['dso_test_3967369']) {
+                sh "ssh -o 'StrictHostKeyChecking=no' ${DEPLOY_USER}@${host} 'sh ${JAR_PATH}/shutdown.sh'"
+                //sh "ssh -o 'StrictHostKeyChecking=no' ${DEPLOY_USER}@${host} 'pwd'"
+                sh "scp -o 'StrictHostKeyChecking=no' ${TARGET_ARTIFACT_PATH} ${DEPLOY_USER}@${host}:${JAR_PATH}"
+                //println("testing the test env deployment");
+                //println("${DEPLOY_USER}@${host}");
+                //sh "ssh -o 'StrictHostKeyChecking=no' ${DEPLOY_USER}@${host} 'pwd'"
+                // sh "ssh -o 'StrictHostKeyChecking=no' ${DEPLOY_USER}@${host} 'pwd'"
+                sh "ssh -o 'StrictHostKeyChecking=no' ${DEPLOY_USER}@${host} 'sh ${JAR_PATH}/startup.sh'"
+              }
+            }
+          }
+        }
+        post {
+            always {   script {  Construct_Pipeline_StageView =   pipelineStageView  stageName : "${env.STAGE_NAME}", buildStatus : currentBuild.currentResult, startTime : startTime, constructPipelineStageView : Construct_Pipeline_StageView    }    }
+        }
+    }
+
+    /*
+    stage('Production Env -  Deployment') {
+      when {
+        allOf {
+          environment name: 'Deployment', value: 'true'
+          environment name: 'CF_ENV', value: 'production'
+          buildingTag()
+        }
+        not {
+          anyOf {
+            branch 'development'
+            branch 'master'
+          }
+        }
+      }
+
+      steps {
+        echo 'Deploying'
+
+        script {
+          startTime = System.currentTimeMillis()
+          def deployHosts =  DEPLOY_HOSTS.split(',')
+
+          for ( host in deployHosts ) {
+            println (host)
+            sshagent (['', '']) {
+              sh "ssh -o 'StrictHostKeyChecking=no'  ${DEPLOY_USER}@${host} 'sh ${JAR_PATH}/shutdown.sh'"
+              sh "scp -o StrictHostKeyChecking=no ${TARGET_ARTIFACT_PATH} ${DEPLOY_USER}@${host}:${JAR_PATH}/${CF_APP_NAME}.${APP_TYPE}"
+              sh "ssh -o 'StrictHostKeyChecking=no'  ${DEPLOY_USER}@${host} 'sh ${JAR_PATH}/startup.sh'"
+            }
+          }
+        }
+      }
+
+        post {
+            always    {    script    {    Construct_Pipeline_StageView =  pipelineStageView  stageName : "${env.STAGE_NAME}", buildStatus : currentBuild.currentResult, startTime : startTime, constructPipelineStageView : Construct_Pipeline_StageView    }    }
+        }
+
+    }
+    */
+
+    
+    
+
+
+	/*
+    stage('CT - Automated Functional Testing') {
+         when {
+              anyOf {
+                    environment name: 'CF_ENV', value: 'development'
+		            environment name: 'CF_ENV', value: 'release'
+			      //  branch 'development'
+			      //  branch 'master'
+					branch 'Testing'
+                }
+            }
+      steps{
+        script{
+                startTime = System.currentTimeMillis()
+                    testUrl= "https://exchangerate.test.ftn.fedex.com/v2/api-docs"
+                    reportPath='ResultSummary/resultReportSummary.txt'
+                    testAutomationReport.appStatus("${testUrl}")
+                   println "Building source from branch ${GIT_BRANCH}"
+                 checkout([$class: 'GitSCM', branches: [[name: '*//*pipeline']], userRemoteConfigs: [[credentialsId: 'FXL-PIPELINE-SSHKEY-ID', url: 'git@gitlab.prod.fedex.com:APP3534989/events_leanft.git']]])  
+                    sh 'mvn clean install'
+                    
+                    Test_Result= testAutomationReport.testResult("${reportPath}")  
+
+            }
+
+
+      }
+      post {
+    
+                  always {   script{  
+                  
+                  Construct_Pipeline_StageView =   pipelineStageView  stageName : "${env.STAGE_NAME}", buildStatus : currentBuild.currentResult, startTime : startTime, constructPipelineStageView : Construct_Pipeline_StageView	}	}
+			
+                 }
+       }
+ */ }
+ 
+    /* post {
+        always {
+      script {
+            // emailNotify recipients : "ScrumIgniters@corp.ds.fedex.com,FXL_DevSecOps@corp.ds.fedex.com",
+        emailNotify recipients : "ryan.slomiany@fedex.com",
+                                                 applicationName : "${CF_APP_NAME}",
+                                                 eaiFolderName : "${EAI_FOLDER_NAME}",
+                                                 buildTimestamp : "${JK_TIMESTAMP}",
+                                                 nexusRepo : "${NEXUS_REPO}",
+                                                 artifactGroupId : "eai${EAI_NUMBER}.${APP_GROUP}",
+                                                 nexusVersion : "${NEXUS_VERSION}",
+                                                 artifactExtension : "${APP_TYPE}",
+                                                 sonarProjectKey : "${SONAR_PROJECT_KEY}",
+                                                 sonarProjectBranch :"${SONAR_PROJECT_BRANCH}",
+                                                 sonarScanStatus :"${SONARSCAN_STATUS}",
+                                                 qualityGatesStatus : "${QUALITYGATES_STATUS}",
+                                                 gitProjectId : "${GIT_PROJECT_ID}",
+                                                 previousReleaseDate : '2019-01-01',
+                                                 //gitServiceCredsId : '3534999_SSH_key',
+                                                 //deployedChecksum : "${DEPLOYED_CHECKSUM}",
+                                                 stageView : "${Construct_Pipeline_StageView}",
+                                                 reportAttachment : "Reports/*.html",
+                                                 automationTestResults : "${Test_Result}"
+
+      }
+        }
+    } */
+}
