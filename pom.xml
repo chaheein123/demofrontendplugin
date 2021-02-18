@@ -74,9 +74,9 @@
 						</goals>
 						<phase>generate-resources</phase>
 						<configuration>
-							<nodeVersion>v10.14.1</nodeVersion>
+							<nodeVersion>v15.0.1</nodeVersion>
 							<nodeDownloadRoot>https://nexus.prod.cloud.fedex.com:8443/nexus/repository/node-dist/</nodeDownloadRoot>
-							<npmVersion>6.11.3</npmVersion>
+							<npmVersion>6.14.6</npmVersion>
 							<npmDownloadRoot>https://nexus.prod.cloud.fedex.com:8443/nexus/repository/npm-dist/</npmDownloadRoot>
 						</configuration>
 					</execution>
